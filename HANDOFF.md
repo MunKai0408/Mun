@@ -1,27 +1,24 @@
 # HANDOFF
 
-**Phiên:** Claude 1 (Project Architect), 2026-11-12
-**Phase/SP hiện tại:** Phase 0 hoàn thành → chuyển sang SP-1.1.
+**Cập nhật:** 2026-11-13 (phiên SP-6.4). **Trạng thái:** MVP đầy đủ luồng chính + LLM Review; đang deploy GitHub Pages; chưa thử API thật.
 
-## Đã hoàn thành
-- SP-0.0…0.4: giả định (DECISIONS), PROJECT_SPEC, ARCHITECTURE, CONTRACTS, STYLE_GUIDE_VI, TASKS, PROGRESS, HANDOFF, NEXT_TASK, CHANGELOG, KNOWN_ISSUES, TESTING, docs/MASTER_PROMPT.md.
+## Đã làm phiên này (SP-6.4)
+Kiểm tra chéo bằng AI: `core/review/review.ts` (mẫu phân tầng, prompt, đọc phản hồi), `services/review/runner.ts` (lô, trần chi phí, huỷ), `callReview` (provider.ts), UI Tổng quan + Cài đặt. Quyết định: DECISIONS D-019. 72/72 test, 3 E2E đạt.
 
-## Chưa hoàn thành
-- Toàn bộ code (chưa có package.json, chưa có repo Git).
-
-## File đã tạo
-Tất cả file `.md` ở thư mục gốc dự án và `docs/`. Không sửa file nào khác.
-
-## Lỗi/rủi ro còn tồn tại
-Xem KNOWN_ISSUES.md (KI-001…KI-004).
-
-## Bước tiếp theo
-SP-1.1 — xem NEXT_TASK.md (chi tiết đầy đủ).
+## Cấu trúc
+- `src/` TypeScript → `tsc` → `site/js/` (đã commit, host tĩnh dùng được ngay).
+- `src/core/*` hàm thuần; `src/services/*` orchestrator/AI/lưu trữ/review; `src/ui/*` giao diện.
+- `netlify/functions/translate.mjs` dùng lại `site/js/services/ai/provider.js` → chạy `npm run build` trước khi deploy Functions.
+- `tests/*.test.mjs` (72 test), `tests/e2e*.mjs` (Playwright toàn cục).
 
 ## Lệnh
-Chưa có. Sau SP-1.1: `npm ci && npm run typecheck && npm run lint && npm test && npm run build`.
+`npm install && npm test` · `npm start` · `npm run test:e2e`
 
 ## Việc người dùng cần làm
-1. Tạo repo GitHub **private**, commit toàn bộ thư mục này (`git init && git add . && git commit -m "Phase 0 docs"`).
-2. (Tuỳ chọn, rất nên) Gửi 50–200 dòng `en.json` thật cho phiên sau để chốt luật Classifier (xoá thông tin nhạy cảm nếu cần).
-3. Ở phiên kế: dán đoạn BOOTSTRAP (đầu file docs/MASTER_PROMPT.md) + nội dung NEXT_TASK.md & HANDOFF.md, hoặc đính kèm ZIP repo.
+1. Deploy: Pages workflow có bước tự lấy `site/` từ file zip ở gốc repo nếu chưa có thư mục `site/`. Khi đưa bản mới lên, xoá zip cũ hoặc đổi tên để workflow lấy đúng zip.
+2. Cài đặt → "Trực tiếp" → dán API key → "Kiểm tra kết nối".
+3. Thử `en.json` nhỏ thật; bật "kiểm tra chéo" (Cài đặt → Quy tắc QA) sau khi dịch xong; báo lại lỗi.
+
+## Điều cần biết
+- Không dùng React/Vite/Tailwind (D-015). Core không phụ thuộc UI.
+- LLM Review chỉ ở chế độ DIRECT (KI-013).

@@ -1,0 +1,20 @@
+{
+  "ui": {
+    "menu": { "play": "Play", "settings": "Settings", "quit": "Quit Game" },
+    "buttons": ["Back", "Next", "Confirm"],
+    "toast": "You found {0} gold!",
+    "color": "#FF8800"
+  },
+  "items": {
+    "potion_health": { "name": "Health Potion", "desc": "Restores <b>50</b> HP to the drinker.\nTastes of cherries." },
+    "sword_01": { "name": "Iron Sword", "desc": "A sturdy blade forged in Ashfall Keep." }
+  },
+  "skills": [ { "id": "skill_fireball", "name": "Fireball", "desc": "Hurls a ball of fire at the enemy for {{damage}} damage." } ],
+  "dialogue": {
+    "intro": "Welcome, traveler. Lord Varek has been waiting for you.",
+    "reply": "I will defeat Lord Varek and save Ashfall Keep!"
+  },
+  "quest": { "q1": { "title": "The Lost Crown", "objective": "Find the crown in Ashfall Keep." } },
+  "meta": { "version": "1.0.3", "icon": "assets/ui/icon.png", "unknownName": "DarkKnight" },
+  "count": 42
+}

@@ -1,30 +1,20 @@
 # NEXT_TASK
 
-**Vai trò:** CLAUDE 1 — PROJECT ARCHITECT (khung dự án)
-**Nhiệm vụ:** SP-1.1 — Khởi tạo dự án Vite + React + TypeScript + công cụ chất lượng + CI.
-**Cỡ:** M. Chỉ làm SP-1.1. Không viết logic nghiệp vụ.
+**Vai trò:** CLAUDE 5 — INTEGRATION & RELEASE (phiên có mạng và API key thử).
+**Mục tiêu:** xác thực với thế giới thật, rồi sửa lỗi phát hiện.
 
 ## Đọc trước
-HANDOFF.md → PROGRESS.md → ARCHITECTURE.md (§1, §5) → CONTRACTS.md → DECISIONS.md (D-001, D-010, D-012, D-014) → TESTING.md.
+HANDOFF.md → PROGRESS.md → KNOWN_ISSUES.md → DECISIONS.md (D-015…D-019).
 
-## Cần làm
-1. Nếu có mạng/`npm`: dùng `npm view <pkg> version` để chọn phiên bản ổn định hiện hành cho: react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss (Tailwind chỉ cài ở SP-1.2), vitest, @playwright/test, eslint (+ typescript-eslint, eslint-plugin-react-hooks), prettier, idb, @netlify/functions. Ghim phiên bản chính xác + lockfile. Nếu không có mạng: ghi `DONE_UNTESTED`, liệt kê phiên bản đề xuất kèm cảnh báo "chưa xác minh", để người dùng chạy `npm install`.
-2. Tạo `package.json` với scripts: `dev`, `build`, `preview`, `typecheck` (`tsc --noEmit`), `lint`, `format`, `test` (vitest run), `test:watch`, `test:e2e`.
-3. `tsconfig.json` strict (`strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`), alias `@/` → `src/`.
-4. Tạo cây thư mục theo ARCHITECTURE §5 (thêm `.gitkeep` cho thư mục rỗng).
-5. `src/contracts/`: chuyển CONTRACTS.md thành `types.ts` (các `declare function` thành khai báo kiểu hàm/`interface`), `defaults.ts` (AppSettings mặc định: batch 30/5000/2, retry 3/1000, qa 1.8/false, budget null, keyMode 'SERVER'), `index.ts`. **Không đổi tên/trường** — nếu cần đổi, sửa CONTRACTS.md + DECISIONS + CHANGELOG (BREAKING) trước.
-6. `tests/unit/contracts.test.ts`: kiểm tra `defaults` thoả `AppSettings` và type-check pass.
-7. ESLint + Prettier cấu hình; `.gitignore` (node_modules, dist, .env, .netlify); `.env.example` (`AI_PROVIDER`, `AI_API_KEY`, `ACCESS_TOKEN`, `ALLOWED_ORIGINS`).
-8. `.github/workflows/ci.yml`: Node LTS, `npm ci`, typecheck, lint, test, build.
-9. `netlify.toml` tối thiểu (build command, publish `dist`, functions dir) — chưa viết function.
-10. `src/main.tsx` + `App.tsx` trang khung đơn giản (tiêu đề tiếng Việt) để build chạy.
-11. Cập nhật PROGRESS.md, HANDOFF.md, CHANGELOG.md, NEXT_TASK.md (→ SP-1.2, Claude 3).
+## Cần làm (theo thứ tự)
+1. `npm install && npm test && npm run test:e2e` trên máy có mạng; ghi kết quả vào PROGRESS.md.
+2. Thử `en.json` thật (≥200 dòng): xem Classifier có loại nhầm/bỏ sót (KI-001). Sửa `src/core/classify/classify.ts` + thêm test.
+3. Gọi API thật (DIRECT) ~40 chuỗi (Pilot): kiểm tra CORS, định dạng JSON, tỷ lệ QA đạt (KI-006). Sau đó chạy "Kiểm tra chéo" trên mẫu thật: xem tỷ lệ bị đánh dấu có hợp lý không, hiệu chỉnh ngưỡng/prompt trong `review.ts` (KI-013).
+4. Đo timeout Netlify thật (KI-004) nếu dùng; thử iPhone Safari thật (KI-007).
+5. Còn thiếu: ảo hoá danh sách Editor (KI-009), test migration IndexedDB, Fuzzy TM (KI-008), USER_GUIDE.md, security audit (SP-11.1).
 
 ## KHÔNG được
-Không cài Tailwind (SP-1.2); không viết IndexedDB (SP-1.3); không sửa MASTER_PROMPT/PROJECT_SPEC; không đổi contract.
+Đổi key/cấu trúc dữ liệu xuất; đổi `types.ts` mà không cập nhật CONTRACTS.md + CHANGELOG (BREAKING); dùng MockProvider trong luồng chạy thật; để LLM Review tự sửa bản dịch.
 
 ## Hoàn thành khi
-`npm ci && npm run typecheck && npm run lint && npm test && npm run build` đều chạy qua (báo kết quả thật). Nếu không chạy được lệnh nào → ghi DONE_UNTESTED và liệt kê lệnh cho người dùng chạy.
-
-## Test cần chạy
-`npm test` (contracts.test.ts), `npm run typecheck`, `npm run build`.
+Một vòng thật: en.json thật → vi.json xuất ra mở được trong game/công cụ đích, không mất key/placeholder.

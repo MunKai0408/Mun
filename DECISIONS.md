@@ -25,3 +25,18 @@
 - **D-012** Ngôn ngữ: tài liệu/báo cáo/UI = tiếng Việt; identifier trong code = tiếng Anh.
 - **D-013** Vai trò theo NEXT_TASK.md, không theo số thứ tự phiên; mỗi lúc một tài khoản làm việc, một branch mỗi SP.
 - **D-014** Trạng thái hoàn thành SP: `DONE_TESTED` / `DONE_UNTESTED` / `BLOCKED` (xem PROGRESS.md).
+
+## Bổ sung 2026-11-13
+- **D-015** Phiên xây dựng không có mạng (npm bị chặn) → dùng TypeScript biên dịch bằng `tsc` ra ESM chạy thẳng trên trình duyệt; giao diện bằng DOM thuần + CSS tự viết. Hoãn React/Vite/Tailwind (D-001 vẫn là hướng đích nếu cần). Lý do kỹ thuật: không thể cài gói. Core/services độc lập UI nên chuyển đổi sau không ảnh hưởng.
+- **D-016** Thêm chế độ `DIRECT`: trình duyệt gọi thẳng nhà cung cấp AI bằng key của người dùng → chạy được trên GitHub Pages không cần backend. Key chỉ ở sessionStorage (tuỳ chọn localStorage), không gửi tới máy chủ nào khác. Anthropic cần header `anthropic-dangerous-direct-browser-access`. Chế độ `SERVER`/`BYO` qua Netlify vẫn giữ.
+- **D-017** `provider.ts` là nguồn duy nhất gọi nhà cung cấp, dùng chung cho trình duyệt và Netlify Function.
+- **D-018** Trang `accounts.html`: sổ điều phối nhiều tài khoản Claude, do người dùng tự cập nhật (localStorage). Không lưu email/mật khẩu/token; không đăng nhập hay tự đọc lượt dùng.
+- **D-019** Mặc định batch 20 chuỗi / 3.500 ký tự / 2 luồng để an toàn với timeout Netlify (D-002); lỗi timeout tự chia đôi lô.
+- **D-020** Chuỗi "nghi ngờ" (PascalCase, kebab/dotted, key kiểu id…) KHÔNG được dịch cho tới khi người dùng xác nhận; chỉ loại tự động khi chắc chắn.
+
+## D-019 — LLM Review (SP-6.4)
+- Chỉ kiểm tra chuỗi VERIFIED mức AUTO, chưa khoá/sửa tay; mẫu ~10% phân tầng theo loại (tối thiểu 3/loại, trần 200), có hạt giống để tái hiện.
+- Chỉ ĐÁNH DẤU: thêm chuyển `VERIFIED → REVIEW_REQUIRED` vào máy trạng thái. Không sửa bản dịch; lý do ghi vào `qaHint` và QA issue `LLM_REVIEW` (MINOR) để nút "Dịch lại chuỗi lỗi" và Biên tập hiển thị được.
+- Ngưỡng đánh dấu: accuracy < 4 hoặc fluency < 4 (thang 1–5). Trần chi phí của lượt kiểm tra = 20% trần ngân sách.
+- `AppSettings.qa.reviewModel` (tuỳ chọn, không BREAKING) cho phép dùng mô hình khác lúc dịch.
+- `provider.ts` tách `chat()` dùng chung cho dịch và kiểm tra.

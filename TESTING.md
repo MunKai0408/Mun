@@ -27,3 +27,8 @@ Khi có `en.json` thật: thêm bản đã ẩn danh vào `tests/fixtures/real/`
 
 ## Bằng chứng
 Dán đầu ra tóm tắt (số test pass/fail, thời gian) vào PROGRESS.md ở cột kết quả.
+
+## Cách chạy thực tế (cập nhật 2026-11-13)
+- `npm test` — biên dịch rồi chạy 61 test bằng `node --test` (`core`, `runner`, `provider`, `function`).
+- `npm run test:e2e` — Chromium qua Playwright toàn cục (cần `NODE_PATH=$(npm root -g)`): `tests/e2e.mjs` (tải lên → phân loại → dịch (chặn mạng giả lập Anthropic) → sửa tay → tải lại trang → xuất, viewport iPhone 13) và `tests/e2e-accounts.mjs`.
+- Fixture: `tests/fixtures/sample-en.json`. Các fixture khác sinh trong test.

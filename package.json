@@ -1,0 +1,17 @@
+{
+  "name": "en-json-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Công cụ dịch en.json sang tiếng Việt (EN→VI) có QA và phục hồi tiến độ",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test tests/*.test.mjs",
+    "start": "node scripts/serve.mjs",
+    "test:e2e": "NODE_PATH=$(npm root -g) node tests/e2e.mjs && NODE_PATH=$(npm root -g) node tests/e2e-accounts.mjs && NODE_PATH=$(npm root -g) node tests/e2e-review.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

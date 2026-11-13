@@ -165,3 +165,16 @@ export declare function exportVi(source: ParseResult, entries: StringEntry[],
 - `EntryId` ổn định giữa các lần mở lại cùng `en.json` (dựa pointer), nên tiến độ không lệch nếu người dùng upload lại cùng file.
 - Merge dùng `span` để thay literal; chuỗi mới phải được encode JSON hợp lệ (escape `"`, `\`, điều khiển; giữ Unicode nguyên bản trừ khi file gốc dùng `\uXXXX` — xem D-004).
 - `translation` luôn chuẩn hoá NFC.
+
+---
+## Thay đổi v1.1.0 (2026-11-13) — bản chuẩn thực thi: `src/contracts/types.ts`
+- `ExcludeReason` thêm `NO_LETTERS`. `ErrorCode` thêm `JSON_TOO_DEEP`, `API_NETWORK`, `QA_FAILED`, `INVALID_TRANSITION`.
+- `ParseResult.maxDepth`; `ParsedStringLiteral.dupIndex` là thứ tự xuất hiện trong số các chuỗi cùng pointer.
+- `StringEntry.qaHint` (gợi ý sửa lỗi gửi kèm khi dịch lại). `BatchItem.fix` thay cho `hint`. `TranslateRequest.neighbors` bắt buộc chỉ để tham khảo.
+- `AppSettings`: `keyMode: 'SERVER'|'BYO'|'DIRECT'`, thêm `provider`, `baseUrl`, `timeoutMs`; `budget` có `priceInPerMTok/priceOutPerMTok`. Mặc định batch 20/3500/2.
+- `exportVi(parse, entries)` trả `{text, report}` (không có tham số `mode`; chuỗi chưa TRANSLATED/VERIFIED luôn giữ nguyên bản gốc).
+- Thêm `ProgressSummary`, `AuditRecord`, `TranslateFn`.
+
+### Thay đổi v1.2.0 (SP-6.4)
+- `AppSettings.qa.reviewModel?: string` (tuỳ chọn). Chuyển trạng thái mới hợp lệ: `VERIFIED → REVIEW_REQUIRED`.
+- Kiểu mới nội bộ (không nằm trong types.ts): `ReviewItem`, `ReviewVerdict` trong `src/core/review/review.ts`.
