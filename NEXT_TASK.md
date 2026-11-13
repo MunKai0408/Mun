@@ -11,7 +11,7 @@ HANDOFF.md → PROGRESS.md → KNOWN_ISSUES.md → DECISIONS.md (D-015…D-019).
 2. Thử `en.json` thật (≥200 dòng): xem Classifier có loại nhầm/bỏ sót (KI-001). Sửa `src/core/classify/classify.ts` + thêm test.
 3. Gọi API thật (DIRECT) ~40 chuỗi (Pilot): kiểm tra CORS, định dạng JSON, tỷ lệ QA đạt (KI-006). Sau đó chạy "Kiểm tra chéo" trên mẫu thật: xem tỷ lệ bị đánh dấu có hợp lý không, hiệu chỉnh ngưỡng/prompt trong `review.ts` (KI-013).
 4. Đo timeout Netlify thật (KI-004) nếu dùng; thử iPhone Safari thật (KI-007).
-5. Còn thiếu: ảo hoá danh sách Editor (KI-009), test migration IndexedDB, Fuzzy TM (KI-008), USER_GUIDE.md, security audit (SP-11.1).
+5. Còn thiếu: ảo hoá danh sách Editor (KI-009), test migration IndexedDB, Fuzzy TM (KI-008), security audit (SP-11.1).
 
 ## KHÔNG được
 Đổi key/cấu trúc dữ liệu xuất; đổi `types.ts` mà không cập nhật CONTRACTS.md + CHANGELOG (BREAKING); dùng MockProvider trong luồng chạy thật; để LLM Review tự sửa bản dịch.

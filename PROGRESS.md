@@ -37,4 +37,4 @@ Kết quả lần chạy gần nhất (2026-11-13, phiên SP-6.4): `tsc` + `node
 | 11.1 | Security audit | NOT_STARTED | Đã có: CSP, không innerHTML, token timing-safe, rate limit, kiểm tra input |
 | 11.2 | Performance iPhone thật | NOT_STARTED | |
 | 11.3 | Deploy GitHub Pages / Netlify | NOT_STARTED | Workflow + cấu hình đã viết, chưa chạy |
-| 11.4 | Final acceptance + USER_GUIDE | NOT_STARTED | Có README |
+| 11.4 | Final acceptance + USER_GUIDE | PARTIAL | Đã có USER_GUIDE.md (đối chiếu tên nút với UI); chưa có final acceptance |

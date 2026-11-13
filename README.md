@@ -25,5 +25,8 @@ npm start          # http://localhost:8080 (có cả /api/translate)
 Tải lên → kiểm tra/phân loại (duyệt chuỗi nghi ngờ) → quét thuật ngữ → dịch thử 40 chuỗi → chấp nhận làm mẫu văn phong → dịch tất cả → xem chuỗi "Cần xem" → xuất (nút hoàn tất chỉ bật khi đủ điều kiện).
 Hãy **Sao lưu dự án** thường xuyên (Safari có thể dọn bộ nhớ trình duyệt).
 
+## Hướng dẫn sử dụng
+Xem `USER_GUIDE.md`.
+
 ## Giới hạn đã biết
 Xem `KNOWN_ISSUES.md`. Chất lượng bản dịch được kiểm bằng QA tự động (placeholder, thẻ, số, thuật ngữ, chữ còn tiếng Anh…), không đảm bảo đúng tuyệt đối — hãy xem lại các chuỗi quan trọng.
