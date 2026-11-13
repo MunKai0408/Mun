@@ -1,0 +1,30 @@
+name: Deploy to GitHub Pages
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chuan bi site
+        run: |
+          set -e
+          if [ -d site ]; then echo "Dung site/ co san"; exit 0; fi
+          zip=$(ls *.zip 2>/dev/null | head -n 1 || true)
+          [ -n "$zip" ] || { echo "Khong co site/ va khong co file zip"; exit 1; }
+          rm -rf /tmp/x && mkdir /tmp/x
+          unzip -q "$zip" -d /tmp/x
+          s=$(find /tmp/x -type d -name site -not -path '*/node_modules/*' | head -n 1)
+          [ -n "$s" ] || { echo "Zip khong co thu muc site"; exit 1; }
+          cp -a "$s" ./site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - id: deployment
+        uses: actions/deploy-pages@v4
