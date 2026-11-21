@@ -22,7 +22,7 @@ import urllib.request
 import requests
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 # Primary engine: Gemini Vision via the custom.gemini connector (the real
 # API key stays in the vault; requests carry a surrogate credential).
@@ -386,28 +386,48 @@ def wrap_text(draw, text, font, max_w):
 
 def blended_patch(img, box, feather=10):
     """Erase the source text inside `box` without leaving a visible
-    solid square: fill the box with a strongly blurred copy of the
-    original region (local colours and gradients survive, glyphs are
-    destroyed), blended with the local median colour to kill any
-    residual glyph ghosts, and paste it back through a feathered mask
-    so the edge melts into the surrounding art."""
+    square: fill the box with a strongly blurred copy of the original
+    region (local colours and gradients survive, glyphs are
+    destroyed), barely nudged toward the local median colour, dust it
+    with grain matched to the photo's own micro-texture so the
+    smoothed patch does not read as a clean rectangle in a noisy
+    image, and paste it back through a widely feathered mask so any
+    tonal step melts over a broad band instead of ending at an
+    edge."""
     W, H = img.size
     x0, y0, x1, y1 = box
+    box_h = max(1, y1 - y0)
+    feather = max(12, int(box_h * 0.35))
     fx0, fy0 = max(0, x0 - feather), max(0, y0 - feather)
     fx1, fy1 = min(W, x1 + feather), min(H, y1 + feather)
     if fx1 <= fx0 or fy1 <= fy0:
         return
     crop = img.crop((fx0, fy0, fx1, fy1)).copy()
-    blur_r = max(8, int(max(1, y1 - y0) * 0.9))
+    blur_r = max(8, int(box_h * 0.9))
     blurred = crop.filter(ImageFilter.GaussianBlur(blur_r))
     blurred = blurred.filter(ImageFilter.GaussianBlur(blur_r))
     solid = Image.new(crop.mode, crop.size,
                       median_border_color(img, (x0, y0, x1, y1)))
-    fill = Image.blend(blurred, solid, 0.45)
+    fill = Image.blend(blurred, solid, 0.15)
+    try:  # grain matched to the surroundings' residue level
+        resid = ImageChops.difference(crop, blurred).convert("L")
+        strip = resid.crop((0, 0, resid.width, max(1, feather // 2)))
+        vals = list(strip.resize((48, 8)).getdata())
+        amp = statistics.median(vals) * 0.9
+        if amp >= 2:
+            import os as _os
+            noise = Image.frombytes(
+                "L", fill.size, _os.urandom(fill.width * fill.height))
+            k = min(0.15, amp / 160.0)
+            noise = noise.point(lambda v: int(128 + (v - 128) * k))
+            fill = ImageChops.add(fill, noise.convert(crop.mode),
+                                  1, -128)
+    except Exception:  # noqa: BLE001 - grain is cosmetic, never fatal
+        pass
     mask = Image.new("L", crop.size, 0)
     mdraw = ImageDraw.Draw(mask)
     mdraw.rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0], fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(max(2, feather // 2)))
+    mask = mask.filter(ImageFilter.GaussianBlur(max(4, feather // 2)))
     img.paste(fill, (fx0, fy0), mask)
 
 
