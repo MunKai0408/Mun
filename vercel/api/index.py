@@ -402,34 +402,43 @@ def blended_patch(img, box, feather=10):
     destroyed), barely nudged toward the local median colour, dust it
     with grain matched to the photo's own micro-texture so the
     smoothed patch does not read as a clean rectangle in a noisy
-    image, and paste it back through a widely feathered mask so any
-    tonal step melts over a broad band instead of ending at an
-    edge."""
+    image, and paste it back through a narrow feathered mask with
+    rounded corners. The blur radius is capped at glyph scale so
+    the art's broader shapes survive inside the patch - an uncapped
+    radius smears a whole multi-line block into one visible blurry
+    rectangle, ringed by its own wide feather halo."""
     W, H = img.size
     x0, y0, x1, y1 = box
     box_h = max(1, y1 - y0)
-    feather = max(12, int(box_h * 0.35))
+    feather = max(6, min(int(box_h * 0.35), 12))
     fx0, fy0 = max(0, x0 - feather), max(0, y0 - feather)
     fx1, fy1 = min(W, x1 + feather), min(H, y1 + feather)
     if fx1 <= fx0 or fy1 <= fy0:
         return
     crop = img.crop((fx0, fy0, fx1, fy1)).copy()
-    blur_r = max(8, int(box_h * 0.9))
+    blur_r = max(6, min(int(box_h * 0.9), 16))
     blurred = crop.filter(ImageFilter.GaussianBlur(blur_r))
     blurred = blurred.filter(ImageFilter.GaussianBlur(blur_r))
     solid = Image.new(crop.mode, crop.size,
                       median_border_color(img, (x0, y0, x1, y1)))
-    fill = Image.blend(blurred, solid, 0.15)
+    fill = Image.blend(blurred, solid, 0.10)
     try:  # grain matched to the surroundings' residue level
         resid = ImageChops.difference(crop, blurred).convert("L")
-        strip = resid.crop((0, 0, resid.width, max(1, feather // 2)))
-        vals = list(strip.resize((48, 8)).getdata())
+        t = max(1, feather // 2)
+        vals = []
+        for strip in (resid.crop((0, 0, resid.width, t)),
+                      resid.crop((0, resid.height - t, resid.width,
+                                  resid.height)),
+                      resid.crop((0, 0, t, resid.height)),
+                      resid.crop((resid.width - t, 0, resid.width,
+                                  resid.height))):
+            vals += list(strip.resize((48, 8)).getdata())
         amp = statistics.median(vals) * 0.9
         if amp >= 2:
             import os as _os
             noise = Image.frombytes(
                 "L", fill.size, _os.urandom(fill.width * fill.height))
-            k = min(0.15, amp / 160.0)
+            k = min(0.30, amp / 120.0)
             noise = noise.point(lambda v: int(128 + (v - 128) * k))
             fill = ImageChops.add(fill, noise.convert(crop.mode),
                                   1, -128)
@@ -437,7 +446,8 @@ def blended_patch(img, box, feather=10):
         pass
     mask = Image.new("L", crop.size, 0)
     mdraw = ImageDraw.Draw(mask)
-    mdraw.rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0], fill=255)
+    mdraw.rounded_rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0],
+                            radius=feather, fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(max(4, feather // 2)))
     img.paste(fill, (fx0, fy0), mask)
 
@@ -638,7 +648,7 @@ def _merge_lines(lines):
                 inter = ox * oy
                 min_area = min(m["width"] * m["height"],
                                ln["width"] * ln["height"])
-                dup = min_area > 0 and inter > 0.45 * min_area
+                dup = min_area > 0 and inter > 0.35 * min_area
                 vgap = max(ln["top"] - (m["top"] + m["height"]),
                            m["top"] - (ln["top"] + ln["height"]))
                 stacked = (vgap < 0.45 * min(m["height"], ln["height"])
