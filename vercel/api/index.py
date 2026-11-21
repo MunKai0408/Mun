@@ -348,6 +348,21 @@ def gtx_translate(texts, sl, tl):
 
 
 # ---------------------------------------------------------------- render
+def median_area_color(img, box):
+    """Median colour of a box's interior. Glyphs cover a minority
+    of the pixels, so the median reflects the background the text
+    sits on - the right basis for choosing black or white text.
+    (The border ring misjudges blocks whose erase box grew into
+    brighter art above the panel, flipping the text to black on a
+    dark background.)"""
+    x0, y0, x1, y1 = box
+    if x1 <= x0 or y1 <= y0:
+        return (0, 0, 0)
+    px = list(img.crop((x0, y0, x1, y1)).resize((16, 16)).getdata())
+    return tuple(int(statistics.median([p[i] for p in px]))
+                 for i in range(3))
+
+
 def median_border_color(img, box):
     x0, y0, x1, y1 = box
     px = img.load()
@@ -397,22 +412,24 @@ def wrap_text(draw, text, font, max_w):
 
 def blended_patch(img, box, feather=10):
     """Erase the source text inside `box` without leaving a visible
-    square: fill the box with a strongly blurred copy of the original
-    region (local colours and gradients survive, glyphs are
-    destroyed), barely nudged toward the local median colour, dust it
-    with grain matched to the photo's own micro-texture so the
-    smoothed patch does not read as a clean rectangle in a noisy
-    image, and paste it back through a narrow feathered mask with
-    rounded corners. The blur radius is capped at glyph scale so
-    the art's broader shapes survive inside the patch - an uncapped
-    radius smears a whole multi-line block into one visible blurry
-    rectangle, ringed by its own wide feather halo."""
+    square: fill the box with a blurred copy of the original region
+    (local colours and gradients survive, glyphs are destroyed),
+    barely nudged toward the local median colour, and paste it back
+    through a mask whose rim fades gradually to transparent while
+    its core stays fully opaque - the patch covers the old text
+    completely yet shows no border. No grain or noise is added:
+    Hazie found the sandy speckle ugly (2026-11-21) and asked for
+    the transparent-rim style instead. The blur radius is capped
+    at glyph scale so the art's broader shapes survive inside the
+    patch - an uncapped radius smears a whole multi-line block
+    into one visible blurry rectangle."""
     W, H = img.size
     x0, y0, x1, y1 = box
     box_h = max(1, y1 - y0)
     feather = max(6, min(int(box_h * 0.35), 12))
-    fx0, fy0 = max(0, x0 - feather), max(0, y0 - feather)
-    fx1, fy1 = min(W, x1 + feather), min(H, y1 + feather)
+    margin = feather + 14
+    fx0, fy0 = max(0, x0 - margin), max(0, y0 - margin)
+    fx1, fy1 = min(W, x1 + margin), min(H, y1 + margin)
     if fx1 <= fx0 or fy1 <= fy0:
         return
     crop = img.crop((fx0, fy0, fx1, fy1)).copy()
@@ -422,33 +439,12 @@ def blended_patch(img, box, feather=10):
     solid = Image.new(crop.mode, crop.size,
                       median_border_color(img, (x0, y0, x1, y1)))
     fill = Image.blend(blurred, solid, 0.10)
-    try:  # grain matched to the surroundings' residue level
-        resid = ImageChops.difference(crop, blurred).convert("L")
-        t = max(1, feather // 2)
-        vals = []
-        for strip in (resid.crop((0, 0, resid.width, t)),
-                      resid.crop((0, resid.height - t, resid.width,
-                                  resid.height)),
-                      resid.crop((0, 0, t, resid.height)),
-                      resid.crop((resid.width - t, 0, resid.width,
-                                  resid.height))):
-            vals += list(strip.resize((48, 8)).getdata())
-        amp = statistics.median(vals) * 0.9
-        if amp >= 2:
-            import os as _os
-            noise = Image.frombytes(
-                "L", fill.size, _os.urandom(fill.width * fill.height))
-            k = min(0.30, amp / 120.0)
-            noise = noise.point(lambda v: int(128 + (v - 128) * k))
-            fill = ImageChops.add(fill, noise.convert(crop.mode),
-                                  1, -128)
-    except Exception:  # noqa: BLE001 - grain is cosmetic, never fatal
-        pass
     mask = Image.new("L", crop.size, 0)
     mdraw = ImageDraw.Draw(mask)
     mdraw.rounded_rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0],
                             radius=feather, fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(max(4, feather // 2)))
+    mask = mask.filter(ImageFilter.GaussianBlur(10))
+    mask = mask.point(lambda v: min(255, int(v * 1.5)))
     img.paste(fill, (fx0, fy0), mask)
 
 
@@ -557,7 +553,9 @@ def render(img, lines, translations):
         # the erase box over neighbouring rows that still look
         # like text, or the clipped line survives as a ghost.
         ex0, ey0, ex1, ey1 = _grow_erase_box(img, (ex0, ey0, ex1, ey1))
-        bg = median_border_color(img, (ex0, ey0, ex1, ey1))
+        bg = median_area_color(img, (ln["left"], ln["top"],
+                                     ln["left"] + ln["width"],
+                                     ln["top"] + ln["height"]))
         jobs.append((ln, tr, (ex0, ey0, ex1, ey1), bg))
     # Pass 1: erase every box first, so no patch can paint over a
     # translation drawn for a neighbouring line.
@@ -579,14 +577,17 @@ def render(img, lines, translations):
             f2 = ImageFont.truetype(FONT_PATH, size)
             wrapped = wrap_text(draw, tr, f2, box_w * 1.02)
             max_h = (ebox[3] - ebox[1]) * 0.98
-            while size > 8 and len(wrapped) * size * 1.25 > max_h:
+            lh = 1.25
+            while size > 8 and len(wrapped) * size * lh > max_h:
                 size = int(size * 0.9)
                 f2 = ImageFont.truetype(FONT_PATH, size)
                 wrapped = wrap_text(draw, tr, f2, box_w * 1.02)
-            ty = y0 + max(0, (box_h - len(wrapped) * f2.size * 1.25) / 2)
+            if len(wrapped) * size * lh > max_h:
+                lh = 1.12  # tighten leading before spilling over
+            ty = y0 + max(0, (box_h - len(wrapped) * f2.size * lh) / 2)
             for wline in wrapped:
                 draw.text((x0 + 1, ty), wline, font=f2, fill=fg)
-                ty += f2.size * 1.25
+                ty += f2.size * lh
             continue
         tw = draw.textlength(tr, font=font)
         tx = x0 + max(0, (box_w - tw) / 2)
@@ -616,6 +617,25 @@ def _iou(a, b):
     inter = max(0, x1 - x0) * max(0, y1 - y0)
     union = (a["width"] * a["height"] + b["width"] * b["height"] - inter)
     return inter / union if union else 0.0
+
+
+def _join_text(a, b):
+    """Join two stacked fragments without repeating the words they
+    share: one model's fragment often re-states the head of the
+    block it was split from ('... R\u00fat 3' + 'R\u00fat 3 \u00c1p
+    d\u1ee5ng ...'), and a naive join prints the overlap twice."""
+    if b in a:
+        return a
+    if a in b:
+        return b
+    aw, bw = a.split(), b.split()
+    best = 0
+    for n in range(2, min(len(aw), len(bw)) + 1):
+        if aw[-n:] == bw[:n]:
+            best = n
+    if best:
+        return " ".join(aw + bw[best:])
+    return a + " " + b
 
 
 def _merge_lines(lines):
@@ -652,9 +672,7 @@ def _merge_lines(lines):
                 vgap = max(ln["top"] - (m["top"] + m["height"]),
                            m["top"] - (ln["top"] + ln["height"]))
                 stacked = (vgap < 0.45 * min(m["height"], ln["height"])
-                           and ox > 0.5 * min(m["width"], ln["width"])
-                           and max(m["height"], ln["height"])
-                           <= 1.4 * min(m["height"], ln["height"]))
+                           and ox > 0.5 * min(m["width"], ln["width"]))
                 if not (dup or stacked):
                     continue
                 x0 = min(m["left"], ln["left"])
@@ -669,7 +687,7 @@ def _merge_lines(lines):
                 else:
                     first, second = (m, ln) if m["top"] <= ln["top"] \
                         else (ln, m)
-                    text = first["text"] + " " + second["text"]
+                    text = _join_text(first["text"], second["text"])
                 m.update({"left": x0, "top": y0, "width": x1 - x0,
                           "height": y1 - y0, "text": text})
                 placed = True
