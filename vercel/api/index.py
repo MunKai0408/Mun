@@ -480,12 +480,16 @@ def _iou(a, b):
 
 
 def gemini_lines(img):
-    """OCR + translate via Gemini Vision: ONE call per screenshot (the
-    free tier rate-limits when one screenshot burns several calls). If
-    the model returns a lazy near-empty result (<4 items), retry ONCE
-    with the alternate model and union both reads. Analysis runs on an
-    upscaled copy when the short side is small (landscape screenshots
-    arrive ~1600x740; card text is a few px tall at native size)."""
+    """OCR + translate via Gemini Vision. A single call is diligent
+    only sometimes - one pass may systematically skip a whole category
+    (e.g. every card title) while still returning 25+ other items, so
+    no count threshold can detect the laziness. Run BOTH models in
+    parallel on every screenshot and union their reads (the IoU
+    dedupe below keeps the longer text); latency stays ~one call
+    while coverage stops depending on one model's mood. Analysis runs
+    on an upscaled copy when the short side is small (landscape
+    screenshots arrive ~1600x740; card text is a few px tall at
+    native size)."""
     W, H = img.size
     scale = 1.0
     if min(W, H) < 1100:
@@ -509,16 +513,38 @@ def gemini_lines(img):
                 "text": " ".join(it["vi"].split())})
         return out
 
-    lines = to_lines(gemini_translate_image(data, "image/jpeg"))
-    if 0 < len(lines) < 4 and len(GEMINI_MODELS) > 1:
-        print(f"[gemini] lazy result ({len(lines)}), retry alt model",
-              flush=True)
+    def safe_call(models):
         try:
-            alt = gemini_translate_image(
-                data, "image/jpeg", models=GEMINI_MODELS[1:])
-            lines += to_lines(alt)
+            return gemini_translate_image(data, "image/jpeg",
+                                          models=models)
         except Exception as e:  # noqa: BLE001
-            print(f"[gemini] alt retry failed: {e}", flush=True)
+            print(f"[gemini] pass {models} failed: {e}", flush=True)
+            return None
+
+    if len(GEMINI_MODELS) > 1:
+        from concurrent.futures import (FIRST_COMPLETED,
+                                        ThreadPoolExecutor, wait)
+        ex = ThreadPoolExecutor(max_workers=2)
+        futs = [ex.submit(safe_call, GEMINI_MODELS[:1]),
+                ex.submit(safe_call, GEMINI_MODELS[1:2])]
+        # Soft deadline: a slow second model must not hold the reply
+        # hostage (the shortcut kills long requests). Proceed with
+        # whichever passes have landed; if none has, wait for the
+        # first to finish.
+        done, _pending = wait(futs, timeout=9)
+        if not done:
+            done, _pending = wait(futs, return_when=FIRST_COMPLETED)
+        results = [f.result() for f in done]
+        ex.shutdown(wait=False)
+        good = [r for r in results if r]
+        if not good and any(r is None for r in results):
+            raise RuntimeError("all gemini passes failed")
+        items = []
+        for r in good:
+            items += r
+        lines = to_lines(items)
+    else:
+        lines = to_lines(gemini_translate_image(data, "image/jpeg"))
     # Zero lines is a valid answer (screen already Vietnamese): the
     # endpoint returns the original image instead of the OCR fallback.
     if scale > 1.0:
@@ -530,7 +556,7 @@ def gemini_lines(img):
     for ln in lines:
         dup = None
         for k in kept:
-            if _iou(ln, k) > 0.5:
+            if _iou(ln, k) > 0.4:
                 dup = k
                 break
         if dup is None:
