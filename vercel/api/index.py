@@ -47,6 +47,12 @@ instead of skipping it.
 If the same text appears in several places, include EVERY occurrence —
 never deduplicate.
 
+Include card names and titles (the large stylized text at the top of
+each card), headings, tab names and menu labels - do not skip titles
+or names. Each box must fully contain the glyphs of its line,
+including ascenders, descenders and diacritics - never clip the top
+or bottom of the text.
+
 Group the words of one visual line into ONE element with ONE box that
 covers the whole line. For each element output:
 - "box": its tight bounding box as [ymin, xmin, ymax, xmax], coordinates
@@ -380,9 +386,11 @@ def wrap_text(draw, text, font, max_w):
 
 def blended_patch(img, box, feather=10):
     """Erase the source text inside `box` without leaving a visible
-    solid square: paint the box with the local median colour, blur the
-    patch into its surroundings, and paste it back through a feathered
-    mask so the edge melts into the original image."""
+    solid square: fill the box with a strongly blurred copy of the
+    original region (local colours and gradients survive, glyphs are
+    destroyed), blended with the local median colour to kill any
+    residual glyph ghosts, and paste it back through a feathered mask
+    so the edge melts into the surrounding art."""
     W, H = img.size
     x0, y0, x1, y1 = box
     fx0, fy0 = max(0, x0 - feather), max(0, y0 - feather)
@@ -390,49 +398,64 @@ def blended_patch(img, box, feather=10):
     if fx1 <= fx0 or fy1 <= fy0:
         return
     crop = img.crop((fx0, fy0, fx1, fy1)).copy()
-    cdraw = ImageDraw.Draw(crop)
-    cdraw.rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0],
-                    fill=median_border_color(img, (x0, y0, x1, y1)))
-    blur_r = max(3, min(12, int(max(y1 - y0, x1 - x0) * 0.12)))
-    crop = crop.filter(ImageFilter.GaussianBlur(blur_r))
+    blur_r = max(8, int(max(1, y1 - y0) * 0.9))
+    blurred = crop.filter(ImageFilter.GaussianBlur(blur_r))
+    blurred = blurred.filter(ImageFilter.GaussianBlur(blur_r))
+    solid = Image.new(crop.mode, crop.size,
+                      median_border_color(img, (x0, y0, x1, y1)))
+    fill = Image.blend(blurred, solid, 0.45)
     mask = Image.new("L", crop.size, 0)
     mdraw = ImageDraw.Draw(mask)
     mdraw.rectangle([x0 - fx0, y0 - fy0, x1 - fx0, y1 - fy0], fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(max(2, feather // 2)))
-    img.paste(crop, (fx0, fy0), mask)
+    img.paste(fill, (fx0, fy0), mask)
 
 
 def render(img, lines, translations):
-    draw = ImageDraw.Draw(img)
     W, H = img.size
+    jobs = []
     for ln, tr in zip(lines, translations):
         if not tr.strip():
             continue
-        pad_x = max(2, int(ln["width"] * 0.03))
-        pad_y = max(1, int(ln["height"] * 0.12))
-        x0 = max(0, ln["left"] - pad_x)
-        y0 = max(0, ln["top"] - pad_y)
-        x1 = min(W - 1, ln["left"] + ln["width"] + pad_x)
-        y1 = min(H - 1, ln["top"] + ln["height"] + pad_y)
-        bg = median_border_color(img, (x0, y0, x1, y1))
-        blended_patch(img, (x0, y0, x1, y1))
+        # Erase box: generous padding around the line's own box so no
+        # glyph of the original text peeks out above or below the
+        # translation. The text itself is drawn inside the line's own
+        # (unpadded) box, where the original text sat.
+        epad_x = max(3, int(ln["width"] * 0.05))
+        epad_y = max(2, int(ln["height"] * 0.30))
+        ex0 = max(0, ln["left"] - epad_x)
+        ey0 = max(0, ln["top"] - epad_y)
+        ex1 = min(W - 1, ln["left"] + ln["width"] + epad_x)
+        ey1 = min(H - 1, ln["top"] + ln["height"] + epad_y)
+        bg = median_border_color(img, (ex0, ey0, ex1, ey1))
+        jobs.append((ln, tr, (ex0, ey0, ex1, ey1), bg))
+    # Pass 1: erase every box first, so no patch can paint over a
+    # translation drawn for a neighbouring line.
+    for _, _, ebox, _ in jobs:
+        blended_patch(img, ebox)
+    # Pass 2: draw the translations.
+    draw = ImageDraw.Draw(img)
+    for ln, tr, ebox, bg in jobs:
         lum = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255.0
         fg = (0, 0, 0) if lum > 0.55 else (255, 255, 255)
-        box_w, box_h = x1 - x0, y1 - y0
-        font = fit_font(draw, tr, box_w * 1.2, box_h * 0.92)
+        x0, y0 = ln["left"], ln["top"]
+        box_w, box_h = ln["width"], ln["height"]
+        font = fit_font(draw, tr, box_w * 1.15, box_h * 0.92)
         if font.size < box_h * 0.45 and len(tr) > 12:
             # Multi-line block (e.g. card description): wrap at a
-            # readable size instead of one shrunken line.
+            # readable size instead of one shrunken line. The block may
+            # use the erased padding above/below, never more.
             size = max(9, int(box_h * 0.30))
             f2 = ImageFont.truetype(FONT_PATH, size)
-            wrapped = wrap_text(draw, tr, f2, box_w * 0.98)
-            while size > 8 and len(wrapped) * size * 1.25 > box_h * 1.05:
+            wrapped = wrap_text(draw, tr, f2, box_w * 1.02)
+            max_h = (ebox[3] - ebox[1]) * 0.98
+            while size > 8 and len(wrapped) * size * 1.25 > max_h:
                 size = int(size * 0.9)
                 f2 = ImageFont.truetype(FONT_PATH, size)
-                wrapped = wrap_text(draw, tr, f2, box_w * 0.98)
+                wrapped = wrap_text(draw, tr, f2, box_w * 1.02)
             ty = y0 + max(0, (box_h - len(wrapped) * f2.size * 1.25) / 2)
             for wline in wrapped:
-                draw.text((x0 + 2, ty), wline, font=f2, fill=fg)
+                draw.text((x0 + 1, ty), wline, font=f2, fill=fg)
                 ty += f2.size * 1.25
             continue
         tw = draw.textlength(tr, font=font)
