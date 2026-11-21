@@ -31,10 +31,13 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 # is never written into this file. Set it in the host's Secrets panel.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_HOST = "generativelanguage.googleapis.com"
-# Probed 2026-11-20 with Hazie's key: the 2.5 family returns 404 for new
-# users; gemini-3-flash-preview 429-ed under heavy testing while
-# gemini-3.1-flash-lite stayed fast and clean — lite leads.
-GEMINI_MODELS = ["gemini-3.1-flash-lite", "gemini-3-flash-preview"]
+# Probed 2026-11-20/21 with Hazie's key: the 2.5 family returns 404
+# for new users; gemini-3-flash-preview is diligent but its free
+# quota is tiny (429s after a handful of calls), while the two
+# 3.1-flash-lite variants stay fast and carry separate quotas - so
+# every screenshot is read by all three in parallel and unioned.
+GEMINI_MODELS = ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview",
+                 "gemini-3-flash-preview"]
 GEMINI_PROMPT = """You are a professional game localizer. The screenshot contains
 text in English or Chinese (Simplified or Traditional). Translate it
 into Vietnamese.
@@ -49,7 +52,9 @@ never deduplicate.
 
 Include card names and titles (the large stylized text at the top of
 each card), headings, tab names and menu labels - do not skip titles
-or names. Each box must fully contain the glyphs of its line,
+or names. Card names are NOT proper names for this purpose -
+translate them too (for example 'Sword Flash' becomes 'Kiếm
+chớp', 'Sword Rain' becomes 'Mưa kiếm'). Each box must fully contain the glyphs of its line,
 including ascenders, descenders and diacritics - never clip the top
 or bottom of the text.
 
@@ -58,7 +63,13 @@ covers the whole line. For each element output:
 - "box": its tight bounding box as [ymin, xmin, ymax, xmax], coordinates
   normalized to 0-1000.
 - "vi": its translation into Vietnamese — natural, concise game-UI style.
-  Keep numbers, stats and proper names unchanged. Translate each element
+  Keep numbers, stats and proper names unchanged. Fixed renderings
+  for recurring terms: Effulgent = rực rỡ, Linked = Liên kết,
+  Quietus = Tĩnh lặng, Shield = Khiên, Damage = Sát thương;
+  'Effulgent Blade' = 'Lưỡi kiếm rực rỡ'. Never leave English
+  words or half-translated phrases in a translation - translate
+  game-mechanic names too; only character and place names stay
+  unchanged. Translate each element
   on its own: never merge text from separate elements, columns or tiles,
   and never join two elements into one entry.
 Skip elements that are already Vietnamese, pure icons, or pure numbers.
@@ -431,6 +442,91 @@ def blended_patch(img, box, feather=10):
     img.paste(fill, (fx0, fy0), mask)
 
 
+def _grow_erase_box(img, box):
+    """Grow an erase box vertically over adjacent rows that still
+    contain text. Gemini sometimes clips the first or last line of
+    a block; the clipped line then survives the erase as a ghost. A
+    row counts as text when its mean residue against a blurred copy
+    is high (glyphs are the sharp local outliers); growth stops at
+    the first clean gap and is capped at 80% of the box height."""
+    x0, y0, x1, y1 = box
+    W, H = img.size
+    box_h = max(1, y1 - y0)
+    cap = int(box_h * 0.8)
+    band_t = max(0, y0 - cap)
+    band_b = min(H, y1 + cap)
+    if x1 <= x0 or band_b <= band_t:
+        return box
+    strip = img.crop((x0, band_t, x1, band_b))
+    blur = strip.filter(ImageFilter.GaussianBlur(max(4, int(box_h * 0.3))))
+    resid = ImageChops.difference(strip, blur).convert("L")
+    rows = list(resid.resize((1, strip.height)).getdata())
+    thr = max(5.5, statistics.median(rows) * 1.7)
+
+    def is_text(r):
+        return rows[r] > thr
+
+    top = y0
+    gap = 0
+    r = y0 - band_t - 1
+    while r >= 0 and y0 - top < cap:
+        if is_text(r):
+            top = band_t + r
+            gap = 0
+        else:
+            gap += 1
+            if gap > 2:
+                break
+        r -= 1
+    bot = y1
+    gap = 0
+    r = y1 - band_t
+    while r < len(rows) and bot - y1 < cap:
+        if is_text(r):
+            bot = band_t + r + 1
+            gap = 0
+        else:
+            gap += 1
+            if gap > 2:
+                break
+        r += 1
+    box_w = max(1, x1 - x0)
+    capx = int(box_w * 0.4)
+    band_l = max(0, x0 - capx)
+    band_r = min(W, x1 + capx)
+    left, right = x0, x1
+    if capx > 0 and band_r > band_l and bot > top:
+        strip2 = img.crop((band_l, top, band_r, bot))
+        blur2 = strip2.filter(
+            ImageFilter.GaussianBlur(max(4, int(box_h * 0.3))))
+        resid2 = ImageChops.difference(strip2, blur2).convert("L")
+        cols = list(resid2.resize((strip2.width, 1)).getdata())
+        cthr = max(5.5, statistics.median(cols) * 1.7)
+        gap = 0
+        c = x0 - band_l - 1
+        while c >= 0 and x0 - left < capx:
+            if cols[c] > cthr:
+                left = band_l + c
+                gap = 0
+            else:
+                gap += 1
+                if gap > 2:
+                    break
+            c -= 1
+        gap = 0
+        c = x1 - band_l
+        while c < len(cols) and right - x1 < capx:
+            if cols[c] > cthr:
+                right = band_l + c + 1
+                gap = 0
+            else:
+                gap += 1
+                if gap > 2:
+                    break
+            c += 1
+    return (left, top, right, bot)
+
+
 def render(img, lines, translations):
     W, H = img.size
     jobs = []
@@ -441,12 +537,16 @@ def render(img, lines, translations):
         # glyph of the original text peeks out above or below the
         # translation. The text itself is drawn inside the line's own
         # (unpadded) box, where the original text sat.
-        epad_x = max(3, int(ln["width"] * 0.05))
-        epad_y = max(2, int(ln["height"] * 0.30))
+        epad_x = max(3, int(ln["width"] * 0.07))
+        epad_y = max(2, int(ln["height"] * 0.40))
         ex0 = max(0, ln["left"] - epad_x)
         ey0 = max(0, ln["top"] - epad_y)
         ex1 = min(W - 1, ln["left"] + ln["width"] + epad_x)
         ey1 = min(H - 1, ln["top"] + ln["height"] + epad_y)
+        # Swallow any original line the model's box clipped: grow
+        # the erase box over neighbouring rows that still look
+        # like text, or the clipped line survives as a ghost.
+        ex0, ey0, ex1, ey1 = _grow_erase_box(img, (ex0, ey0, ex1, ey1))
         bg = median_border_color(img, (ex0, ey0, ex1, ey1))
         jobs.append((ln, tr, (ex0, ey0, ex1, ey1), bg))
     # Pass 1: erase every box first, so no patch can paint over a
@@ -489,6 +589,15 @@ def render(img, lines, translations):
 
 
 # ---------------------------------------------------------------- gemini
+def _prefer(a, b):
+    """Prefer the read that looks like an actual translation
+    (Vietnamese diacritics, i.e. non-ASCII) over a source-language
+    echo of the same box, then the longer text."""
+    ka = (any(ord(c) > 127 for c in a), len(a))
+    kb = (any(ord(c) > 127 for c in b), len(b))
+    return ka > kb
+
+
 def _iou(a, b):
     x0 = max(a["left"], b["left"])
     y0 = max(a["top"], b["top"])
@@ -499,11 +608,77 @@ def _iou(a, b):
     return inter / union if union else 0.0
 
 
+def _merge_lines(lines):
+    """Normalise granularity before rendering. One model may return
+    a card's stat block as a single item while another returns the
+    same block as five separate lines; drawn as-is, the fragments
+    land on top of the block and of each other - overlapping text
+    and per-line colour flips. Merge any two items whose boxes
+    overlap substantially (a fragment inside a block is the same
+    content read twice: keep the longer text) or that sit stacked
+    like lines of one block (small vertical gap, horizontally
+    aligned: join in reading order). Menu rows and separate cards
+    are too far apart to ever merge."""
+    def overlap(a, b):
+        ox = min(a["left"] + a["width"], b["left"] + b["width"]) \
+            - max(a["left"], b["left"])
+        oy = min(a["top"] + a["height"], b["top"] + b["height"]) \
+            - max(a["top"], b["top"])
+        return max(0, ox), max(0, oy)
+
+    lines = [dict(l) for l in lines]
+    for _round in range(8):
+        lines.sort(key=lambda l: (l["top"], l["left"]))
+        out = []
+        changed = False
+        for ln in lines:
+            placed = False
+            for m in out:
+                ox, oy = overlap(m, ln)
+                inter = ox * oy
+                min_area = min(m["width"] * m["height"],
+                               ln["width"] * ln["height"])
+                dup = min_area > 0 and inter > 0.45 * min_area
+                vgap = max(ln["top"] - (m["top"] + m["height"]),
+                           m["top"] - (ln["top"] + ln["height"]))
+                stacked = (vgap < 0.45 * min(m["height"], ln["height"])
+                           and ox > 0.5 * min(m["width"], ln["width"])
+                           and max(m["height"], ln["height"])
+                           <= 1.4 * min(m["height"], ln["height"]))
+                if not (dup or stacked):
+                    continue
+                x0 = min(m["left"], ln["left"])
+                y0 = min(m["top"], ln["top"])
+                x1 = max(m["left"] + m["width"],
+                         ln["left"] + ln["width"])
+                y1 = max(m["top"] + m["height"],
+                         ln["top"] + ln["height"])
+                if dup:
+                    text = ln["text"] if _prefer(ln["text"], m["text"]) \
+                        else m["text"]
+                else:
+                    first, second = (m, ln) if m["top"] <= ln["top"] \
+                        else (ln, m)
+                    text = first["text"] + " " + second["text"]
+                m.update({"left": x0, "top": y0, "width": x1 - x0,
+                          "height": y1 - y0, "text": text})
+                placed = True
+                changed = True
+                break
+            if not placed:
+                out.append(ln)
+        lines = out
+        if not changed:
+            break
+    lines.sort(key=lambda l: (l["top"], l["left"]))
+    return lines
+
+
 def gemini_lines(img):
     """OCR + translate via Gemini Vision. A single call is diligent
     only sometimes - one pass may systematically skip a whole category
     (e.g. every card title) while still returning 25+ other items, so
-    no count threshold can detect the laziness. Run BOTH models in
+    no count threshold can detect the laziness. Run every model in
     parallel on every screenshot and union their reads (the IoU
     dedupe below keeps the longer text); latency stays ~one call
     while coverage stops depending on one model's mood. Analysis runs
@@ -544,9 +719,10 @@ def gemini_lines(img):
     if len(GEMINI_MODELS) > 1:
         from concurrent.futures import (FIRST_COMPLETED,
                                         ThreadPoolExecutor, wait)
-        ex = ThreadPoolExecutor(max_workers=2)
-        futs = [ex.submit(safe_call, GEMINI_MODELS[:1]),
-                ex.submit(safe_call, GEMINI_MODELS[1:2])]
+        passes = [GEMINI_MODELS[i:i + 1]
+                  for i in range(min(3, len(GEMINI_MODELS)))]
+        ex = ThreadPoolExecutor(max_workers=len(passes))
+        futs = [ex.submit(safe_call, p) for p in passes]
         # Soft deadline: a slow second model must not hold the reply
         # hostage (the shortcut kills long requests). Proceed with
         # whichever passes have landed; if none has, wait for the
@@ -581,9 +757,9 @@ def gemini_lines(img):
                 break
         if dup is None:
             kept.append(ln)
-        elif len(ln["text"]) > len(dup["text"]):
+        elif _prefer(ln["text"], dup["text"]):
             dup["text"] = ln["text"]
-    return kept
+    return _merge_lines(kept)
 
 
 # ---------------------------------------------------------------- endpoint
