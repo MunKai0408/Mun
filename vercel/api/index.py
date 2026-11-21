@@ -454,11 +454,11 @@ def _grow_erase_box(img, box):
     a block; the clipped line then survives the erase as a ghost. A
     row counts as text when its mean residue against a blurred copy
     is high (glyphs are the sharp local outliers); growth stops at
-    the first clean gap and is capped at 80% of the box height."""
+    the first clean gap and is capped at 45% of the box height."""
     x0, y0, x1, y1 = box
     W, H = img.size
     box_h = max(1, y1 - y0)
-    cap = int(box_h * 0.8)
+    cap = int(box_h * 0.45)
     band_t = max(0, y0 - cap)
     band_b = min(H, y1 + cap)
     if x1 <= x0 or band_b <= band_t:
@@ -497,7 +497,7 @@ def _grow_erase_box(img, box):
                 break
         r += 1
     box_w = max(1, x1 - x0)
-    capx = int(box_w * 0.4)
+    capx = int(box_w * 0.25)
     band_l = max(0, x0 - capx)
     band_r = min(W, x1 + capx)
     left, right = x0, x1
@@ -543,8 +543,8 @@ def render(img, lines, translations):
         # glyph of the original text peeks out above or below the
         # translation. The text itself is drawn inside the line's own
         # (unpadded) box, where the original text sat.
-        epad_x = max(3, int(ln["width"] * 0.07))
-        epad_y = max(2, int(ln["height"] * 0.40))
+        epad_x = max(3, int(ln["width"] * 0.04))
+        epad_y = max(2, int(ln["height"] * 0.22))
         ex0 = max(0, ln["left"] - epad_x)
         ey0 = max(0, ln["top"] - epad_y)
         ex1 = min(W - 1, ln["left"] + ln["width"] + epad_x)
@@ -568,12 +568,12 @@ def render(img, lines, translations):
         fg = (0, 0, 0) if lum > 0.55 else (255, 255, 255)
         x0, y0 = ln["left"], ln["top"]
         box_w, box_h = ln["width"], ln["height"]
-        font = fit_font(draw, tr, box_w * 1.15, box_h * 0.92)
+        font = fit_font(draw, tr, box_w * 1.15, box_h * 0.88)
         if font.size < box_h * 0.45 and len(tr) > 12:
             # Multi-line block (e.g. card description): wrap at a
             # readable size instead of one shrunken line. The block may
             # use the erased padding above/below, never more.
-            size = max(9, int(box_h * 0.30))
+            size = max(9, int(box_h * 0.27))
             f2 = ImageFont.truetype(FONT_PATH, size)
             wrapped = wrap_text(draw, tr, f2, box_w * 1.02)
             max_h = (ebox[3] - ebox[1]) * 0.98
